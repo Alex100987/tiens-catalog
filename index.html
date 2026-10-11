@@ -194,6 +194,7 @@ let mentor=null, pending=null, lookupErr="";
   if(ref){ if(PARTNERS[ref]){ mentor={code:ref,name:PARTNERS[ref]}; store.set("tiens_m",JSON.stringify(mentor)); } else { lookupErr=`Номер ${ref} из ссылки не найден в каталоге. Уточните номер у того, кто прислал ссылку.`; } return; }
   try{const s=JSON.parse(store.get("tiens_m")||"null"); if(s&&PARTNERS[s.code]) mentor=s;}catch(e){}
 })();
+if(mentor) once("open"+mentor.code,()=>hit(mentor.code,"open"));
 
 const state={cab:null,view:"home",pid:null,q:"",stack:[],quiz:{},resetAsk:false,my:{code:"",name:"",link:"",err:""}};
 
@@ -248,7 +249,7 @@ function vReg(){
     <li><b>Проверьте имя</b><p>${ok?`В поле «Пригласивший» должен стоять номер ${esc(mentor.code)}. Если поле пустое — вставьте скопированный номер. После «Проверить» должно появиться имя ${esc(mentor.name)}.`:"В поле «Пригласивший» введите номер и нажмите «Проверить». Должно появиться имя пригласившего."}</p></li>
     <li><b>Оформите ID и покупайте</b><p>Профиль → «Связать номер реселлера» → «Присоединяйтесь к нам». В полях «Наставник» и «Позиционный спонсор» — тот же номер. Первая покупка от 100 PV активирует ID. С 18 лет.</p></li>
   </ol>
-  <div class="cta">${ok?`<a class="btn p block" href="${VM(mentor.code)}" target="_blank" rel="noopener">Открыть V-Moment</a>`:`<button class="btn p block" aria-disabled="true">Сначала укажите номер пригласившего</button>`}</div>
+  <div class="cta">${ok?`<a class="btn p block" data-vm href="${VM(mentor.code)}" target="_blank" rel="noopener">Открыть V-Moment</a>`:`<button class="btn p block" aria-disabled="true">Сначала укажите номер пригласившего</button>`}</div>
   <p class="disc">Порядок регистрации — на октябрь 2026, сверить с ООО «Тяньши» перед запуском.</p>`;
 }
 
@@ -282,27 +283,37 @@ function vQuiz(){
 }
 
 
+const NS="tiens-catalog-demo-a1", API="https://abacus.jasoncameron.dev";
+const KEYS=[["open","Открыли каталог по вашей ссылке"],["views","Просмотров товаров"],["buy","Нажали «Купить»"],["vm","Перешли в V-Moment"],["posts","Раз скопированы посты"],["team","Человек в команде"]];
+function hit(code,key){if(!code)return;try{fetch(`${API}/hit/${NS}/p${code}-${key}`,{mode:"cors"}).catch(()=>{})}catch(e){}}
+function once(flag,fn){let k="t_"+flag;try{if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,"1")}catch(e){}fn()}
+function onceForever(flag,fn){let k="tf_"+flag;if(store.get(k))return;store.set(k,"1");fn()}
+async function getv(code,key){try{const r=await fetch(`${API}/get/${NS}/p${code}-${key}`);if(!r.ok)return 0;const j=await r.json();return j.value||0}catch(e){return null}}
+async function loadCab(){
+  const c=state.cab; state.cabData=null; render(true);
+  const out={}; for(const [k] of KEYS) out[k]=await getv(c,k);
+  out.prod={}; for(const p of P) out.prod[p.id]=await getv(c,"v-"+p.id);
+  if(state.cab===c){state.cabData=out; render(true)}
+}
 function vCab(){
   const me=state.cab;
   if(!me) return `<section class="hero"><h1>Мой кабинет</h1><p>Статистика по вашей ссылке и вашей команде. Видите только вы.</p></section>
   <form data-form="cab"><div class="field"><label for="cabCode">Ваш номер в V-Moment (VM ID)</label><input type="tel" inputmode="numeric" id="cabCode" placeholder="8 цифр"><span class="hint">В рабочей версии на вашу почту или телефон придёт код для входа.</span></div>
   <div class="wrap" style="margin-top:14px"><button class="btn p block" type="submit">Войти</button></div></form>`;
-  const S={open:128,views:342,reg:23,conf:17,posts:9};
-  const fun=[["Открыли каталог",S.open],["Подтвердили наставника",S.conf+6],["Нажали «Регистрация»",S.reg],["Перешли в V-Moment",S.conf]];
-  const top=[["Кальций «Тяньши»",96],["Омега-3 90%",71],["Витамины для глаз «Тяньши»",58],["Хитозан в капсулах «Тяньши»",44],["Дайджест Натурал «Тяньши»",31]];
-  const team=[["Марина К.","9 клиентов","41 переход"],["Сергей П.","5 клиентов","22 перехода"],["Ольга Д.","2 клиента","8 переходов"]];
-  return `<section class="hero"><h1>Мой кабинет</h1><p>Номер ${esc(me)}. За последние 30 дней.</p></section>
-  <section class="sec"><span class="flag">Пример данных</span><p class="hint" style="margin-top:8px">В рабочей версии здесь настоящие цифры по вашей ссылке.</p></section>
-  <section class="sec"><h3>Мои клиенты</h3><div class="stats">
-    <div class="stat"><b>${S.open}</b><span>открыли каталог по вашей ссылке</span></div>
-    <div class="stat"><b>${S.views}</b><span>просмотров товаров</span></div>
-    <div class="stat"><b>${S.reg}</b><span>нажали «Регистрация»</span></div>
-    <div class="stat"><b>${S.posts}</b><span>раз вы скопировали посты</span></div></div></section>
-  <section class="sec"><h3>Путь клиента</h3>${fun.map(([l,v])=>`<div class="fn"><span>${l}</span><div class="track"><i style="width:${Math.max(4,v/S.open*100)}%"></i></div><em>${v}</em></div>`).join("")}</section>
-  <section class="sec"><h3>Что смотрят чаще всего</h3>${top.map(([n,v])=>`<div class="tline"><span>${n}</span><span>${v} просм.</span></div>`).join("")}</section>
-  <section class="sec"><h3>Моя команда</h3><p class="hint" style="margin-bottom:6px">Люди, которые пришли по вашей ссылке и создали свою.</p>${team.map(([n,a,b])=>`<div class="tline"><span>${n}</span><span>${a} · ${b}</span></div>`).join("")}</section>
+  const d=state.cabData;
+  if(!d) return `<section class="hero"><h1>Мой кабинет</h1><p>Номер ${esc(me)}. Загружаю цифры…</p></section>`;
+  const v=k=>d[k]===null?"—":d[k];
+  const base=Math.max(1,d.open||0);
+  const fun=[["Открыли каталог",d.open],["Нажали «Купить»",d.buy],["Перешли в V-Moment",d.vm]];
+  const top=P.map(p=>[p.name,d.prod[p.id]||0]).sort((a,b)=>b[1]-a[1]);
+  return `<section class="hero"><h1>Мой кабинет</h1><p>Номер ${esc(me)}. Цифры считаются автоматически.</p></section>
+  <section class="sec"><h3>Мои клиенты</h3><div class="stats">${KEYS.slice(0,4).map(([k,l])=>`<div class="stat"><b>${v(k)}</b><span>${l}</span></div>`).join("")}</div></section>
+  <section class="sec"><h3>Путь клиента</h3>${fun.map(([l,x])=>`<div class="fn"><span>${l}</span><div class="track"><i style="width:${x?Math.max(4,x/base*100):0}%"></i></div><em>${x??"—"}</em></div>`).join("")}</section>
+  <section class="sec"><h3>Что смотрят</h3>${top.map(([n,x])=>`<div class="tline"><span>${esc(n)}</span><span>${x} просм.</span></div>`).join("")}</section>
+  <section class="sec"><h3>Моя команда</h3><div class="stats"><div class="stat"><b>${v("team")}</b><span>человек создали свою ссылку, придя по вашей</span></div><div class="stat"><b>${v("posts")}</b><span>раз вы скопировали посты</span></div></div></section>
   <section class="sec"><h3>Продажи и доход</h3><p class="hint" style="margin-bottom:10px">Ваши продажи, товарооборот и доход — в V-Moment, раздел VShare.</p><a class="btn g block" href="https://xin-prod-oversea.jikeint.com/registerSign?isShare=1&lang=ru-RU&nation_id=RU" target="_blank" rel="noopener">Открыть V-Moment</a></section>
-  <div class="wrap" style="margin-top:12px"><button class="btn g block" data-act="logout">Выйти</button></div>`;
+  <div class="row" style="margin:12px 16px 0"><button class="btn p" data-act="cab-refresh">Обновить цифры</button><button class="btn g" data-act="logout">Выйти</button></div>
+  <p class="disc">Демо: цифры хранятся на бесплатном тестовом сервере.</p>`;
 }
 function render(keepScroll){
   const v=state.view, y=window.scrollY, cx=$("#car")?$("#car").scrollLeft:0;
@@ -321,23 +332,25 @@ document.addEventListener("click",e=>{
   const t=e.target.closest("button,a");if(!t)return;const d=t.dataset;
   if(d.tab){state.stack=[];state.view=d.tab;render();return}
   if(t.id==="backBtn"){const p=state.stack.pop();if(p){Object.assign(state,p);render()}return}
-  if(d.open){go("product",{pid:d.open});return}
-  if(d.go){go(d.go);return}
+  if(d.open){if(mentor){hit(mentor.code,"views");hit(mentor.code,"v-"+d.open)}go("product",{pid:d.open});return}
+  if(d.go){if(mentor&&state.view==="product")hit(mentor.code,"buy");go(d.go);return}
+  if(t.dataset.vm!==undefined&&mentor){hit(mentor.code,"vm")}
   if(d.qi!==undefined){state.quiz[+d.qi]=+d.oi;render(true);return}
   if(d.next!==undefined){const c=$("#car");c.scrollTo({left:c.clientWidth*(+d.next),behavior:"smooth"});return}
   const a=d.act;if(!a)return;
-  if(a==="confirm"){mentor=pending;pending=null;store.set("tiens_m",JSON.stringify(mentor));render(true);toast("Наставник подтверждён")}
+  if(a==="confirm"){mentor=pending;pending=null;store.set("tiens_m",JSON.stringify(mentor));once("open"+mentor.code,()=>hit(mentor.code,"open"));render(true);toast("Наставник подтверждён")}
   if(a==="cancel"){pending=null;lookupErr="Уточните номер у того, кто прислал вам каталог.";render(true)}
   if(a==="reset"){state.resetAsk=true;render(true)}
   if(a==="reset-no"){state.resetAsk=false;render(true)}
   if(a==="reset-yes"){mentor=null;state.resetAsk=false;store.del("tiens_m");render(true)}
-  if(a==="copy-post"){const p=P.find(x=>x.id===state.pid);copy(p.post,"Пост скопирован")}
+  if(a==="copy-post"){const p=P.find(x=>x.id===state.pid);copy(p.post,"Пост скопирован");const me=state.cab||state.my.code;if(me)hit(me,"posts")}
   if(a==="copy-code")copy(mentor.code,"Номер скопирован");
   if(a==="copy-link")copy(state.my.link,"Ссылка скопирована");
   if(a==="copy-base")copy(BASE,"Ссылка скопирована");
   if(a==="copy-msg"){const m=state.my;copy(`Привет! Отправляю каталог TIENS: ${m.link}\nДля регистрации и покупки в V-Moment используй мой номер: ${m.code}\nПосле кнопки «Проверить» должно появиться моё имя: ${m.name||"________"}`,"Сообщение скопировано")}
   if(a==="quiz-reset"){state.quiz={};render()}
-  if(a==="logout"){state.cab=null;render()}
+  if(a==="logout"){state.cab=null;state.cabData=null;render()}
+  if(a==="cab-refresh"){loadCab()}
 });
 document.addEventListener("submit",e=>{
   e.preventDefault();const f=e.target.dataset.form;
@@ -346,9 +359,9 @@ document.addEventListener("submit",e=>{
     else if(PARTNERS[c])pending={code:c,name:PARTNERS[c]};
     else lookupErr="Такого партнёра в каталоге нет. Уточните номер у того, кто прислал вам каталог.";
     render(true)}
-  if(f==="cab"){const c=digits($("#cabCode").value);if(c.length<6){toast("Введите номер: 8 цифр");return}state.cab=c;render();return}
+  if(f==="cab"){const c=digits($("#cabCode").value);if(c.length<6){toast("Введите номер: 8 цифр");return}state.cab=c;loadCab();return}
   if(f==="my"){const c=digits($("#myCode").value),n=$("#myName").value.trim();Object.assign(state.my,{code:c,name:n});
-    if(c.length<6){state.my.err="Введите ваш номер из V-Moment: 8 цифр.";state.my.link=""}else{state.my.err="";state.my.link=BASE+"?ref="+c}
+    if(c.length<6){state.my.err="Введите ваш номер из V-Moment: 8 цифр.";state.my.link=""}else{state.my.err="";state.my.link=BASE+"?ref="+c;if(mentor&&mentor.code!==c)onceForever("team"+c,()=>hit(mentor.code,"team"))}
     render(true);const o=$("#out");o&&o.scrollIntoView({behavior:"smooth",block:"start"})}
 });
 document.addEventListener("input",e=>{if(e.target.id==="q"){state.q=e.target.value;const pos=e.target.selectionStart;render(true);const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
