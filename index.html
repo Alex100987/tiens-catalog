@@ -187,14 +187,46 @@ function toast(t){const el=$("#toast");el.textContent=t;el.hidden=false;clearTim
 async function copy(text,msg){try{await navigator.clipboard.writeText(text);toast(msg||"Скопировано")}catch(e){const ta=document.createElement("textarea");ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");toast(msg||"Скопировано")}catch(_){toast("Выделите текст и скопируйте вручную")}ta.remove()}}
 const initials=n=>n.split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase();
 
-/* mentor: confirmed only for numbers from the partner base */
-let mentor=null, pending=null, lookupErr="";
-(function init(){
+/* mentor: confirmed only for numbers from the partner base (demo base: shared counter server) */
+const NS="tiens-catalog-demo-a1", API="https://abacus.jasoncameron.dev";
+let mentor=null, pending=null, lookupErr="", busy="";
+async function remoteName(c){
+  try{
+    const r=await fetch(`${API}/get/${NS}/pn-${c}-len`); if(!r.ok) return null;
+    const L=(await r.json()).value; if(!L) return null;
+    const bytes=[];
+    for(let i=0;i*3<L;i++){
+      const rr=await fetch(`${API}/get/${NS}/pn-${c}-${i}`); if(!rr.ok) return null;
+      let v=(await rr.json()).value; const k=Math.min(3,L-i*3); const ch=[];
+      for(let j=0;j<k;j++){ch.unshift(v%256);v=Math.floor(v/256)}
+      bytes.push(...ch);
+    }
+    return new TextDecoder().decode(new Uint8Array(bytes));
+  }catch(e){return null}
+}
+async function findPartner(c){ if(PARTNERS[c]) return PARTNERS[c]; return await remoteName(c); }
+async function registerPartner(c,name){
+  const b=new TextEncoder().encode(name);
+  try{
+    const r=await fetch(`${API}/create/${NS}/pn-${c}-len?initializer=${b.length}`);
+    if(r.status===409){ const ex=await remoteName(c); return ex===name?{ok:true}:{ok:false,taken:ex}; }
+    if(!r.ok) return {ok:false};
+    for(let i=0;i*3<b.length;i++){ let v=0; for(let j=i*3;j<Math.min(i*3+3,b.length);j++) v=v*256+b[j];
+      await fetch(`${API}/create/${NS}/pn-${c}-${i}?initializer=${v}`); }
+    return {ok:true};
+  }catch(e){return {ok:false}}
+}
+(async function init(){
   let ref=null; try{ref=digits(new URLSearchParams(location.search).get("ref"))}catch(e){}
-  if(ref){ if(PARTNERS[ref]){ mentor={code:ref,name:PARTNERS[ref]}; store.set("tiens_m",JSON.stringify(mentor)); } else { lookupErr=`Номер ${ref} из ссылки не найден в каталоге. Уточните номер у того, кто прислал ссылку.`; } return; }
-  try{const s=JSON.parse(store.get("tiens_m")||"null"); if(s&&PARTNERS[s.code]) mentor=s;}catch(e){}
+  if(ref){
+    busy="Проверяю номер из ссылки…"; setTimeout(()=>render(true),0);
+    const name=await findPartner(ref); busy="";
+    if(name){ mentor={code:ref,name}; store.set("tiens_m",JSON.stringify(mentor)); once("open"+ref,()=>hit(ref,"open")); }
+    else lookupErr=`Номер ${ref} из ссылки не найден в каталоге. Уточните номер у того, кто прислал ссылку.`;
+    render(true); return;
+  }
+  try{const s=JSON.parse(store.get("tiens_m")||"null"); if(s&&s.code&&s.name){ mentor=s; once("open"+s.code,()=>hit(s.code,"open")); }}catch(e){}
 })();
-if(mentor) once("open"+mentor.code,()=>hit(mentor.code,"open"));
 
 const state={cab:null,view:"home",pid:null,q:"",stack:[],quiz:{},resetAsk:false,my:{code:"",name:"",link:"",err:""}};
 
@@ -206,6 +238,7 @@ function mentorHTML(){
   let inner=`<small style="color:var(--warn)">Номер пригласившего</small><strong style="font-size:15px">Введите номер человека, который прислал вам каталог</strong>
     <form class="form" data-form="lookup"><input type="tel" inputmode="numeric" id="lk" placeholder="8 цифр, например 99630071" aria-label="Номер пригласившего"><button class="btn p" type="submit">Проверить</button></form>`;
   if(pending) inner+=`<div class="found"><p style="margin:0">Это номер <b>${esc(pending.name)}</b>. Верно?</p><div class="row" style="margin-top:10px"><button class="btn p" data-act="confirm">Да, это он</button><button class="btn g" data-act="cancel">Нет</button></div></div>`;
+  if(busy) inner+=`<div class="found">${esc(busy)}</div>`;
   if(lookupErr) inner+=`<div class="err">${esc(lookupErr)}</div>`;
   return `<section class="mentor">${inner}</section>`;
 }
@@ -262,11 +295,12 @@ function vSend(){
     <div class="field"><label for="myName">Ваше имя</label><input type="text" id="myName" placeholder="Например, Алексей Корнилов" value="${esc(m.name)}"></div>
     <div class="wrap" style="margin-top:14px"><button class="btn p block" type="submit">Создать мою ссылку</button></div>
   </form>
+  ${m.saving?`<p class="found" style="margin:12px 16px 0">Записываю ваш номер в каталог…</p>`:""}
   ${m.err?`<p class="err" style="margin:12px 16px 0">${esc(m.err)}</p>`:""}
   ${m.link?`<div class="out" id="out"><span class="label">Ваша ссылка на каталог</span><div class="linkline">${esc(m.link)}</div>
     <button class="btn p" data-act="copy-link">Скопировать ссылку</button><div class="qr" id="qr"></div>
     <span class="label">Готовое сообщение</span><div class="post">${esc(msg)}</div><button class="btn g" data-act="copy-msg">Скопировать сообщение</button>
-    ${PARTNERS[m.code]?"":`<p class="hint">Демо: в базе каталога пока только номер 99630071. В рабочей версии ваш номер добавится в базу автоматически.</p>`}</div>`:""}
+    <p class="hint">Ваш номер и имя записаны в каталог. Теперь по этому номеру вас найдут.</p></div>`:""}
   <section class="sec"><h3>Общая ссылка без номера</h3><p class="hint" style="margin-bottom:10px">Можно отправлять кому угодно. Номер человек введёт сам.</p><div class="linkline">${BASE}</div><button class="btn g block" style="margin-top:10px" data-act="copy-base">Скопировать</button></section>
   <section class="sec" style="background:var(--warn-soft);border-color:transparent"><h3>Никогда</h3><p style="font-size:14px">Не отправляйте чужой номер и не просите человека сменить наставника. О продукте говорите только то, что написано в каталоге: это БАД, не лекарство.</p></section>`;
 }
@@ -283,7 +317,6 @@ function vQuiz(){
 }
 
 
-const NS="tiens-catalog-demo-a1", API="https://abacus.jasoncameron.dev";
 const KEYS=[["open","Открыли каталог по вашей ссылке"],["views","Просмотров товаров"],["buy","Нажали «Купить»"],["vm","Перешли в V-Moment"],["posts","Раз скопированы посты"],["team","Человек в команде"]];
 function hit(code,key){if(!code)return;try{fetch(`${API}/hit/${NS}/p${code}-${key}`,{mode:"cors"}).catch(()=>{})}catch(e){}}
 function once(flag,fn){let k="t_"+flag;try{if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,"1")}catch(e){}fn()}
@@ -355,14 +388,20 @@ document.addEventListener("click",e=>{
 document.addEventListener("submit",e=>{
   e.preventDefault();const f=e.target.dataset.form;
   if(f==="lookup"){const c=digits($("#lk").value);pending=null;lookupErr="";
-    if(c.length<6)lookupErr="Номер — это 8 цифр. Проверьте и попробуйте ещё раз.";
-    else if(PARTNERS[c])pending={code:c,name:PARTNERS[c]};
-    else lookupErr="Такого партнёра в каталоге нет. Уточните номер у того, кто прислал вам каталог.";
-    render(true)}
+    if(c.length<6){lookupErr="Номер — это 8 цифр. Проверьте и попробуйте ещё раз.";render(true);return}
+    busy="Проверяю номер…";render(true);
+    findPartner(c).then(name=>{busy="";if(name)pending={code:c,name};else lookupErr="Такого партнёра в каталоге нет. Уточните номер у того, кто прислал вам каталог.";render(true)});return}
   if(f==="cab"){const c=digits($("#cabCode").value);if(c.length<6){toast("Введите номер: 8 цифр");return}state.cab=c;loadCab();return}
-  if(f==="my"){const c=digits($("#myCode").value),n=$("#myName").value.trim();Object.assign(state.my,{code:c,name:n});
-    if(c.length<6){state.my.err="Введите ваш номер из V-Moment: 8 цифр.";state.my.link=""}else{state.my.err="";state.my.link=BASE+"?ref="+c;if(mentor&&mentor.code!==c)onceForever("team"+c,()=>hit(mentor.code,"team"))}
-    render(true);const o=$("#out");o&&o.scrollIntoView({behavior:"smooth",block:"start"})}
+  if(f==="my"){const c=digits($("#myCode").value),n=$("#myName").value.trim().slice(0,40);Object.assign(state.my,{code:c,name:n,link:""});
+    if(c.length<6){state.my.err="Введите ваш номер из V-Moment: 8 цифр.";render(true);return}
+    if(n.length<2){state.my.err="Введите ваше имя — его увидит человек при проверке номера.";render(true);return}
+    state.my.err="";state.my.saving=true;render(true);
+    (PARTNERS[c]?Promise.resolve(PARTNERS[c]===n?{ok:true}:{ok:false,taken:PARTNERS[c]}):registerPartner(c,n)).then(res=>{
+      state.my.saving=false;
+      if(res.ok){state.my.link=BASE+"?ref="+c;if(mentor&&mentor.code!==c)onceForever("team"+c,()=>hit(mentor.code,"team"))}
+      else if(res.taken)state.my.err=`Номер ${c} уже записан в каталоге на имя «${res.taken}». Один номер — один партнёр. Проверьте номер.`;
+      else state.my.err="Не удалось сохранить. Проверьте интернет и попробуйте ещё раз.";
+      render(true);const o=$("#out");o&&o.scrollIntoView({behavior:"smooth",block:"start"})});return}
 });
 document.addEventListener("input",e=>{if(e.target.id==="q"){state.q=e.target.value;const pos=e.target.selectionStart;render(true);const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
 render();
