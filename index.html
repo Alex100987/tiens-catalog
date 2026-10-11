@@ -217,12 +217,13 @@ async function registerPartner(c,name){
   }catch(e){return {ok:false}}
 }
 (async function init(){
-  let ref=null; try{ref=digits(new URLSearchParams(location.search).get("ref"))}catch(e){}
+  let ref=null, nm=""; try{const q=new URLSearchParams(location.search); ref=digits(q.get("ref")); nm=(q.get("n")||"").trim().slice(0,40)}catch(e){}
   if(ref){
-    busy="Проверяю номер из ссылки…"; setTimeout(()=>render(true),0);
+    if(nm){ mentor={code:ref,name:nm}; store.set("tiens_m",JSON.stringify(mentor)); once("open"+ref,()=>hit(ref,"open")); }
+    else { busy="Проверяю номер из ссылки…"; setTimeout(()=>render(true),0); }
     const name=await findPartner(ref); busy="";
-    if(name){ mentor={code:ref,name}; store.set("tiens_m",JSON.stringify(mentor)); once("open"+ref,()=>hit(ref,"open")); }
-    else lookupErr=`Номер ${ref} из ссылки не найден в каталоге. Уточните номер у того, кто прислал ссылку.`;
+    if(name){ const first=!mentor; mentor={code:ref,name}; store.set("tiens_m",JSON.stringify(mentor)); if(first) once("open"+ref,()=>hit(ref,"open")); }
+    else if(!mentor) lookupErr=`Номер ${ref} из ссылки не найден в каталоге. Уточните номер у того, кто прислал ссылку.`;
     render(true); return;
   }
   try{const s=JSON.parse(store.get("tiens_m")||"null"); if(s&&s.code&&s.name){ mentor=s; once("open"+s.code,()=>hit(s.code,"open")); }}catch(e){}
@@ -301,7 +302,7 @@ function vSend(){
     <button class="btn p" data-act="copy-link">Скопировать ссылку</button><div class="qr" id="qr"></div>
     <span class="label">Готовое сообщение</span><div class="post">${esc(msg)}</div><button class="btn g" data-act="copy-msg">Скопировать сообщение</button>
     <p class="hint">Ваш номер и имя записаны в каталог. Теперь по этому номеру вас найдут.</p></div>`:""}
-  <section class="sec"><h3>Общая ссылка без номера</h3><p class="hint" style="margin-bottom:10px">Можно отправлять кому угодно. Номер человек введёт сам.</p><div class="linkline">${BASE}</div><button class="btn g block" style="margin-top:10px" data-act="copy-base">Скопировать</button></section>
+
   <section class="sec" style="background:var(--warn-soft);border-color:transparent"><h3>Никогда</h3><p style="font-size:14px">Не отправляйте чужой номер и не просите человека сменить наставника. О продукте говорите только то, что написано в каталоге: это БАД, не лекарство.</p></section>`;
 }
 
@@ -398,7 +399,7 @@ document.addEventListener("submit",e=>{
     state.my.err="";state.my.saving=true;render(true);
     (PARTNERS[c]?Promise.resolve(PARTNERS[c]===n?{ok:true}:{ok:false,taken:PARTNERS[c]}):registerPartner(c,n)).then(res=>{
       state.my.saving=false;
-      if(res.ok){state.my.link=BASE+"?ref="+c;if(mentor&&mentor.code!==c)onceForever("team"+c,()=>hit(mentor.code,"team"))}
+      if(res.ok){state.my.link=BASE+"?ref="+c+"&n="+encodeURIComponent(n);if(mentor&&mentor.code!==c)onceForever("team"+c,()=>hit(mentor.code,"team"))}
       else if(res.taken)state.my.err=`Номер ${c} уже записан в каталоге на имя «${res.taken}». Один номер — один партнёр. Проверьте номер.`;
       else state.my.err="Не удалось сохранить. Проверьте интернет и попробуйте ещё раз.";
       render(true);const o=$("#out");o&&o.scrollIntoView({behavior:"smooth",block:"start"})});return}
